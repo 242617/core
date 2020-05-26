@@ -9,9 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pkg/errors"
+
 	"github.com/242617/core/config/source"
 	"github.com/242617/core/config/source/file"
-	"github.com/pkg/errors"
 )
 
 type Item struct {
@@ -23,7 +24,7 @@ type Item struct {
 		Age     uint    `env:"USER_AGE"`
 		Balance float64 `env:"USER_BALANCE" default:"10.25"`
 		Active  bool    `env:"USER_ACTIVE" default:"true"`
-	} `env:"USER"`
+	}
 	Status  string        `yaml:"status_string" default:"ok"`
 	Timeout time.Duration `env:"TIMEOUT" default:"10s"`
 }

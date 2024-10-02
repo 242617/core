@@ -57,7 +57,7 @@ type (
 		funcs, fallbacks         []Func
 		thenCatcher, elseCatcher CatchFunc
 		catchers                 []CatchFunc
-		invoke, call             InvokeFunc
+		before, after            InvokeFunc
 		reset                    bool
 	}
 )
@@ -91,13 +91,13 @@ func (p *Pipeline) Catch(catchers ...CatchFunc) *Pipeline {
 	return p
 }
 
-func (p *Pipeline) Invoke(invoke InvokeFunc) *Pipeline {
-	p.layers[len(p.layers)-1].invoke = invoke
+func (p *Pipeline) Before(before InvokeFunc) *Pipeline {
+	p.layers[len(p.layers)-1].before = before
 	return p
 }
 
-func (p *Pipeline) Call(f func(...any), args ...any) *Pipeline {
-	p.layers[len(p.layers)-1].call = func() { f(args...) }
+func (p *Pipeline) After(after InvokeFunc) *Pipeline {
+	p.layers[len(p.layers)-1].after = after
 	return p
 }
 
@@ -112,6 +112,9 @@ func (p *Pipeline) Run(errFunc ErrFunc) {
 			p.err = nil
 			continue
 		}
+		if layer.before != nil {
+			layer.before()
+		}
 		if p.err == nil && len(layer.funcs) > 0 {
 			p.err = p.process(layer.funcs...)
 			if p.err != nil && layer.thenCatcher != nil {
@@ -123,12 +126,9 @@ func (p *Pipeline) Run(errFunc ErrFunc) {
 			if p.err != nil && layer.elseCatcher != nil {
 				p.err = p.intercept(layer.elseCatcher)
 			}
-			if layer.invoke != nil {
-				layer.invoke()
-			}
-			if layer.call != nil {
-				layer.call()
-			}
+		}
+		if layer.after != nil {
+			layer.after()
 		}
 	}
 	errFunc(p.err)

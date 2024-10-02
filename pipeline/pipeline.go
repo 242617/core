@@ -23,6 +23,8 @@ New creates pipeline that call functions in this order:
   - Else...
   - ElseCatch
   - Catch...
+  - Invoke
+  - Call
 
 Example:
 
@@ -42,10 +44,11 @@ func New(ctx context.Context, funcs ...Func) *Pipeline {
 }
 
 type (
-	Func      = func(context.Context) error
-	CatchFunc = func(error) error
-	ErrFunc   = func(error)
-	Pipeline  struct {
+	Func       = func(context.Context) error
+	CatchFunc  = func(error) error
+	ErrFunc    = func(error)
+	InvokeFunc = func()
+	Pipeline   struct {
 		ctx    context.Context
 		err    error
 		layers []layer
@@ -54,6 +57,7 @@ type (
 		funcs, fallbacks         []Func
 		thenCatcher, elseCatcher CatchFunc
 		catchers                 []CatchFunc
+		invoke, call             InvokeFunc
 		reset                    bool
 	}
 )
@@ -75,8 +79,8 @@ func (p *Pipeline) Else(fallbacks ...Func) *Pipeline {
 	return p
 }
 
-func (p *Pipeline) ElseCatch(f CatchFunc) *Pipeline {
-	p.layers[len(p.layers)-1].elseCatcher = f
+func (p *Pipeline) ElseCatch(catcher CatchFunc) *Pipeline {
+	p.layers[len(p.layers)-1].elseCatcher = catcher
 	return p
 }
 
@@ -84,6 +88,16 @@ func (p *Pipeline) Catch(catchers ...CatchFunc) *Pipeline {
 	if p.layers[len(p.layers)-1].catchers == nil {
 		p.layers[len(p.layers)-1].catchers = catchers
 	}
+	return p
+}
+
+func (p *Pipeline) Invoke(invoke InvokeFunc) *Pipeline {
+	p.layers[len(p.layers)-1].invoke = invoke
+	return p
+}
+
+func (p *Pipeline) Call(f func(...any), args ...any) *Pipeline {
+	p.layers[len(p.layers)-1].call = func() { f(args...) }
 	return p
 }
 
@@ -108,6 +122,12 @@ func (p *Pipeline) Run(errFunc ErrFunc) {
 			}
 			if p.err != nil && layer.elseCatcher != nil {
 				p.err = p.intercept(layer.elseCatcher)
+			}
+			if layer.invoke != nil {
+				layer.invoke()
+			}
+			if layer.call != nil {
+				layer.call()
 			}
 		}
 	}
@@ -135,15 +155,6 @@ func (p *Pipeline) process(funcs ...Func) error {
 	case err = <-errCh:
 	}
 	return err
-}
-
-func (p *Pipeline) Call(f func(...any), args ...any) *Pipeline {
-	f(args...)
-	return p
-}
-func (p *Pipeline) Invoke(f func()) *Pipeline {
-	f()
-	return p
 }
 
 func (p *Pipeline) String() string {

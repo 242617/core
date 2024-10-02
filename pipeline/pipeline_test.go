@@ -219,6 +219,25 @@ func TestAll(t *testing.T) {
 	}
 }
 
+func TestInvoke(t *testing.T) {
+	first, second := withCallCounter{}, withCallCounter{}
+	pipeline.New(context.Background()).
+		Then(first.Call).
+		Invoke(func() {
+			assert.Equal(t, 1, first.Called(), "first called once")
+			assert.Equal(t, 0, second.Called(), "second never called")
+		}).
+		Then(second.Call).
+		Invoke(func() {
+			assert.Equal(t, 1, first.Called(), "first called once")
+			assert.Equal(t, 1, second.Called(), "second called once")
+		}).
+		Run(func(err error) {
+			require.NoError(t, err, "expect no error")
+		})
+
+}
+
 func TestThenAndElseCatches(t *testing.T) {
 	var one, two bool
 	firstErr, secondErr := errors.New("first"), errors.New("second")

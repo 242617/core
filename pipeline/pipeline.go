@@ -9,7 +9,9 @@ import (
 )
 
 func NewWithOptions(options ...option) *Pipeline {
-	var p Pipeline
+	p := Pipeline{
+		layers: make([]layer, 1),
+	}
 	for _, option := range options {
 		option(&p)
 	}
@@ -18,30 +20,47 @@ func NewWithOptions(options ...option) *Pipeline {
 
 /*
 New creates pipeline that call functions in this order:
-  - Then...
+  - Before
+  - Then
   - ThenCatch
-  - Else...
+  - Else
   - ElseCatch
-  - Catch...
-  - Invoke
-  - Call
+  - After
+  - Run
 
 Example:
 
 	errCh := make(chan error)
-	go pipeline.New(ctx).
-		Then(func(ctx context.Context) error {
-			return nil
+	go pipeline.New(context.Background()).
+		Before(func() { fmt.Println("1. before") }).
+		Then(func(context.Context) error {
+			fmt.Println("2. then")
+			return errors.New("sample error")
 		}).
-		Else(func(ctx context.Context) error {
-			return nil
+		ThenCatch(func(err error) error {
+			fmt.Println("3. then catch")
+			return err
 		}).
-		Run(func(err error) { errCh <- err })
-	return <-errCh
+		Else(func(context.Context) error {
+			fmt.Println("4. else")
+			return errors.New("sample error")
+		}).
+		ElseCatch(func(err error) error {
+			fmt.Println("5. else catch")
+			return err
+		}).
+		After(func() { fmt.Println("6. after") }).
+		Run(func(err error) {
+			fmt.Println("7. run")
+			errCh <- err
+		})
+	fmt.Println(<-errCh)
 */
 func New(ctx context.Context, funcs ...Func) *Pipeline {
 	return NewWithOptions(WithContext(ctx)).Then(funcs...)
 }
+
+// TODO: Add concurrency control
 
 type (
 	Func       = func(context.Context) error
@@ -56,14 +75,24 @@ type (
 	layer struct {
 		funcs, fallbacks         []Func
 		thenCatcher, elseCatcher CatchFunc
-		catchers                 []CatchFunc
 		before, after            InvokeFunc
 		reset                    bool
 	}
 )
 
+func (p *Pipeline) Before(before InvokeFunc) *Pipeline {
+	if p.layers[len(p.layers)-1].funcs != nil {
+		p.layers = append(p.layers, layer{})
+	}
+	p.layers[len(p.layers)-1].before = before
+	return p
+}
+
 func (p *Pipeline) Then(funcs ...Func) *Pipeline {
-	p.layers = append(p.layers, layer{funcs: funcs})
+	if p.layers[len(p.layers)-1].funcs != nil {
+		p.layers = append(p.layers, layer{})
+	}
+	p.layers[len(p.layers)-1].funcs = funcs
 	return p
 }
 
@@ -84,25 +113,8 @@ func (p *Pipeline) ElseCatch(catcher CatchFunc) *Pipeline {
 	return p
 }
 
-func (p *Pipeline) Catch(catchers ...CatchFunc) *Pipeline {
-	if p.layers[len(p.layers)-1].catchers == nil {
-		p.layers[len(p.layers)-1].catchers = catchers
-	}
-	return p
-}
-
-func (p *Pipeline) Before(before InvokeFunc) *Pipeline {
-	p.layers[len(p.layers)-1].before = before
-	return p
-}
-
 func (p *Pipeline) After(after InvokeFunc) *Pipeline {
 	p.layers[len(p.layers)-1].after = after
-	return p
-}
-
-func (p *Pipeline) Reset() *Pipeline {
-	p.layers = append(p.layers, layer{reset: true})
 	return p
 }
 
@@ -165,7 +177,13 @@ func (p *Pipeline) String() string {
 		if layer.reset {
 			layerInfo = "reset"
 		} else {
-			layerInfo = fmt.Sprintf("funcs: %d, fallbacks: %d", len(layer.funcs), len(layer.fallbacks))
+			// catchers
+			layerInfo = fmt.Sprintf("before: %5t, then: %2d, thenCatcher: %5t, else: %2d, elseCatcher: %5t, after: %5t",
+				layer.before != nil,
+				len(layer.funcs), layer.thenCatcher != nil,
+				len(layer.fallbacks), layer.elseCatcher != nil,
+				layer.after != nil,
+			)
 		}
 		info.WriteString(fmt.Sprintf("[%2d]: %s\n", i, layerInfo))
 	}

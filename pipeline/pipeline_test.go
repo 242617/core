@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/242617/core/pipeline"
 )
@@ -17,6 +18,7 @@ import (
 var period = 10 * time.Millisecond
 
 func init() { log.SetFlags(log.Lshortfile) }
+
 func TestBasic(t *testing.T) {
 	{
 		var first, second, third withCallCounter
@@ -24,12 +26,12 @@ func TestBasic(t *testing.T) {
 			Then(second.Call).
 			Else(third.Call).
 			Run(func(err error) {
-				assert.NoError(t, err, "no error")
+				require.NoError(t, err, "no error")
 			})
 
 		assert.Equal(t, 1, first.Called(), "first called once")
 		assert.Equal(t, 1, second.Called(), "second called once")
-		assert.Equal(t, 0, third.Called(), "third not called")
+		assert.Equal(t, 0, third.Called(), "third never called")
 	}
 
 	{
@@ -37,7 +39,7 @@ func TestBasic(t *testing.T) {
 		errFunc := withError{sampleErr}
 		pipeline.New(context.Background(), errFunc.Call).
 			Run(func(err error) {
-				assert.ErrorIs(t, err, sampleErr, "sample error")
+				require.ErrorIs(t, err, sampleErr, "sample error")
 			})
 	}
 
@@ -51,29 +53,12 @@ func TestBasic(t *testing.T) {
 			Else(third.Call).
 			Then(fourth.Call).
 			Run(func(err error) {
-				assert.ErrorIs(t, err, sampleErr, "sample error")
+				require.ErrorIs(t, err, sampleErr, "sample error")
 			})
-		assert.Equal(t, 0, first.Called(), "first not called")
-		assert.Equal(t, 0, second.Called(), "second not called")
-		assert.Equal(t, 0, third.Called(), "third not called")
-		assert.Equal(t, 0, fourth.Called(), "fourth not called")
-	}
-
-	{
-		sampleErr := errors.New("sample error")
-		var first, second, third withCallCounter
-		errFunc := withError{sampleErr}
-		pipeline.New(context.Background(), errFunc.Call).
-			Then(first.Call).
-			Reset().
-			Then(second.Call).
-			Else(third.Call).
-			Run(func(err error) {
-				assert.NoError(t, err, "no error")
-			})
-		assert.Equal(t, 0, first.Called(), "first not called")
-		assert.Equal(t, 1, second.Called(), "second not called")
-		assert.Equal(t, 0, third.Called(), "third not called")
+		assert.Equal(t, 0, first.Called(), "first never called")
+		assert.Equal(t, 0, second.Called(), "second never called")
+		assert.Equal(t, 0, third.Called(), "third never called")
+		assert.Equal(t, 0, fourth.Called(), "fourth never called")
 	}
 
 	{
@@ -86,13 +71,13 @@ func TestBasic(t *testing.T) {
 			Else(third.Call).
 			Then(fourth.Call).
 			Run(func(err error) {
-				assert.ErrorIs(t, err, sampleErr, "sample error")
+				require.ErrorIs(t, err, sampleErr, "sample error")
 			})
 
-		assert.Equal(t, 0, first.Called(), "first not called")
-		assert.Equal(t, 0, second.Called(), "second not called")
-		assert.Equal(t, 0, third.Called(), "third not called")
-		assert.Equal(t, 0, fourth.Called(), "fourth not called")
+		assert.Equal(t, 0, first.Called(), "first never called")
+		assert.Equal(t, 0, second.Called(), "second never called")
+		assert.Equal(t, 0, third.Called(), "third never called")
+		assert.Equal(t, 0, fourth.Called(), "fourth never called")
 	}
 
 	{
@@ -107,12 +92,12 @@ func TestBasic(t *testing.T) {
 			Else(third.Call).
 			Else(fourth.Call).
 			Run(func(err error) {
-				assert.NoError(t, err, sampleErr, "no error")
+				require.NoError(t, err, sampleErr, "no error")
 			})
 		assert.Equal(t, 1, first.Called(), "first called once")
 		assert.Equal(t, 1, second.Called(), "second called once")
 		assert.Equal(t, 1, third.Called(), "third called once")
-		assert.Equal(t, 0, fourth.Called(), "fourth not called")
+		assert.Equal(t, 0, fourth.Called(), "fourth never called")
 	}
 }
 
@@ -128,7 +113,7 @@ func TestContextCancel(t *testing.T) {
 			Then(next.Call).
 			Run(func(err error) { summary = err.Error() })
 
-		assert.Equal(t, 0, next.Called(), "next not called")
+		assert.Equal(t, 0, next.Called(), "next never called")
 		assert.Equal(t, "context canceled", summary, "context canceled")
 	}
 
@@ -144,7 +129,7 @@ func TestContextCancel(t *testing.T) {
 			Run(func(err error) {
 				assert.Equal(t, "context canceled", err.Error(), "context canceled")
 			})
-		assert.Equal(t, 0, third.Called(), "third not called")
+		assert.Equal(t, 0, third.Called(), "third never called")
 	}
 }
 
@@ -160,7 +145,7 @@ func TestContextTimeout(t *testing.T) {
 			Then(next.Call).
 			Run(func(err error) { summary = err.Error() })
 
-		assert.Equal(t, 0, next.Called(), "next not called")
+		assert.Equal(t, 0, next.Called(), "next never called")
 		assert.Equal(t, "context deadline exceeded", summary, "context deadline exceeded")
 	}
 
@@ -176,7 +161,7 @@ func TestContextTimeout(t *testing.T) {
 			Run(func(err error) {
 				assert.Equal(t, "context deadline exceeded", err.Error(), "context deadline exceeded")
 			})
-		assert.Equal(t, 0, third.Called(), "third not called")
+		assert.Equal(t, 0, third.Called(), "third never called")
 	}
 }
 
@@ -186,7 +171,7 @@ func TestAll(t *testing.T) {
 		pipeline.New(context.Background(), first.Call).
 			Then(second.Call, third.Call).
 			Run(func(err error) {
-				assert.NoError(t, err, "no error")
+				require.NoError(t, err, "no error")
 			})
 
 		assert.Equal(t, 1, first.Called(), "first called once")
@@ -200,11 +185,11 @@ func TestAll(t *testing.T) {
 		pipeline.New(context.Background(), first.Call).
 			Then(second.Call, third.Call).
 			Run(func(err error) {
-				assert.True(t, strings.Contains(err.Error(), "sample"), "sample")
+				require.True(t, strings.Contains(err.Error(), "sample"), "sample")
 			})
 
-		assert.Equal(t, 0, second.Called(), "second not called")
-		assert.Equal(t, 0, third.Called(), "third not called")
+		assert.Equal(t, 0, second.Called(), "second never called")
+		assert.Equal(t, 0, third.Called(), "third never called")
 	}
 
 	{ // waiting for errors
@@ -213,7 +198,79 @@ func TestAll(t *testing.T) {
 		pipeline.New(context.Background(), new(withCallCounter).Call).
 			Then(first.Call, second.Call).
 			Run(func(err error) {
-				assert.ErrorIs(t, err, firstErr, "first error")
+				require.ErrorIs(t, err, firstErr, "first error")
+			})
+	}
+}
+
+func TestBeforeAndAfter(t *testing.T) {
+	first, second, third := withCallCounter{}, withCallCounter{}, withCallCounter{}
+	pipeline.New(context.Background()).
+		Before(func() { first.Call(context.Background()) }).
+		Before(func() {
+			assert.Equal(t, 0, first.Called(), "first never called")
+			assert.Equal(t, 0, second.Called(), "second never called")
+			assert.Equal(t, 0, third.Called(), "third never called")
+		}).
+		Then(second.Call).
+		After(func() {
+			assert.Equal(t, 0, first.Called(), "first never called")
+			assert.Equal(t, 1, second.Called(), "second called once")
+			assert.Equal(t, 0, third.Called(), "third never called")
+		}).
+		Before(func() {
+			assert.Equal(t, 0, first.Called(), "first never called")
+			assert.Equal(t, 1, second.Called(), "second called once")
+			assert.Equal(t, 0, third.Called(), "third never called")
+		}).
+		After(func() {
+			assert.Equal(t, 0, first.Called(), "first never called")
+			assert.Equal(t, 1, second.Called(), "second called once")
+			assert.Equal(t, 1, third.Called(), "third called once")
+		}).
+		Then(third.Call).
+		Run(func(err error) {
+			require.NoError(t, err, "expect no error")
+		})
+
+}
+
+func TestCatches(t *testing.T) {
+	var one, two bool
+	firstErr, secondErr := errors.New("first"), errors.New("second")
+	first, second := withError{firstErr}, withError{secondErr}
+	third := withCallCounter{}
+	pipeline.New(context.Background()).
+		Then(first.Call).
+		ThenCatch(func(err error) error {
+			one = true
+			return err
+		}).
+		Else(second.Call).
+		ElseCatch(func(err error) error {
+			two = true
+			return err
+		}).
+		Then(third.Call).
+		Run(func(err error) {
+			require.ErrorIs(t, err, secondErr, "second error")
+		})
+	assert.Equal(t, 0, third.Called(), "third never called")
+	assert.True(t, one, "unexpected one value")
+	assert.True(t, two, "unexpected two value")
+
+	{ // Fall-through after then catches
+		sampleErr := errors.New("sample error")
+		noError, sampleError := withEmpty{}, withError{sampleErr}
+		pipeline.New(context.Background()).
+			Then(noError.Call).
+			ThenCatch(func(err error) error {
+				assert.NoError(t, err, "expect no error")
+				return err
+			}).
+			Then(sampleError.Call).
+			Run(func(err error) {
+				require.ErrorIs(t, err, sampleErr, "sample error")
 			})
 	}
 }

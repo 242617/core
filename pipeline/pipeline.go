@@ -124,10 +124,12 @@ func (p *Pipeline) Run(errFunc ErrFunc) {
 			p.err = nil
 			continue
 		}
-		if layer.before != nil {
-			layer.before()
-		}
 		if p.err == nil && len(layer.funcs) > 0 {
+
+			if layer.before != nil {
+				layer.before()
+			}
+
 			p.err = p.process(layer.funcs...)
 			if p.err != nil && layer.thenCatcher != nil {
 				p.err = p.intercept(layer.thenCatcher)
@@ -138,9 +140,11 @@ func (p *Pipeline) Run(errFunc ErrFunc) {
 			if p.err != nil && layer.elseCatcher != nil {
 				p.err = p.intercept(layer.elseCatcher)
 			}
-		}
-		if layer.after != nil {
-			layer.after()
+
+			if layer.after != nil {
+				layer.after()
+			}
+
 		}
 	}
 	errFunc(p.err)

@@ -259,6 +259,40 @@ func TestCatches(t *testing.T) {
 	assert.True(t, one, "unexpected one value")
 	assert.True(t, two, "unexpected two value")
 
+	{
+		firstBefore, firstAfter := withCallCounter{}, withCallCounter{}
+		firstErr := errors.New("first")
+		first := withError{firstErr}
+		secondBefore, secondAfter := withCallCounter{}, withCallCounter{}
+		second := withCallCounter{}
+		secondThenCatch := withCallCounter{}
+		pipeline.New(context.Background()).
+			Before(func() { firstBefore.Call(context.Background()) }).
+			Then(first.Call).
+			ThenCatch(func(err error) error {
+				require.ErrorIs(t, err, firstErr, "unexpected first error")
+				return err
+			}).
+			After(func() { firstAfter.Call(context.Background()) }).
+			///
+			Before(func() { secondBefore.Call(context.Background()) }).
+			Then(second.Call).
+			ThenCatch(func(err error) error {
+				secondThenCatch.Call(context.Background())
+				return err
+			}).
+			After(func() { secondAfter.Call(context.Background()) }).
+			Run(func(err error) {
+				require.ErrorIs(t, err, firstErr, "first error")
+			})
+		assert.Equal(t, 1, firstBefore.Called(), "firstBefore called once")
+		assert.Equal(t, 1, firstAfter.Called(), "firstAfter called once")
+		assert.Equal(t, 0, secondBefore.Called(), "secondBefore never called")
+		assert.Equal(t, 0, second.Called(), "second never called")
+		assert.Equal(t, 0, secondThenCatch.Called(), "secondThenCatch never called")
+		assert.Equal(t, 0, secondAfter.Called(), "secondAfter never called")
+	}
+
 	{ // Fall-through after then catches
 		sampleErr := errors.New("sample error")
 		noError, sampleError := withEmpty{}, withError{sampleErr}

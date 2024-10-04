@@ -63,11 +63,13 @@ func New(ctx context.Context, funcs ...Func) *Pipeline {
 // TODO: Add concurrency control
 
 type (
-	Func       = func(context.Context) error
-	CatchFunc  = func(error) error
-	ErrFunc    = func(error)
-	InvokeFunc = func()
-	Pipeline   struct {
+	Func        = func(context.Context) error
+	CatchFunc   = func(error) error
+	ErrFunc     = func(error)
+	InvokeFunc  = func()
+	ErrorFunc   = func(error) error
+	NoErrorFunc = func() error
+	Pipeline    struct {
 		ctx    context.Context
 		err    error
 		layers []layer
@@ -76,6 +78,8 @@ type (
 		funcs, fallbacks         []Func
 		thenCatcher, elseCatcher CatchFunc
 		before, after            InvokeFunc
+		error                    ErrorFunc
+		noError                  NoErrorFunc
 		reset                    bool
 	}
 )
@@ -113,6 +117,16 @@ func (p *Pipeline) ElseCatch(catcher CatchFunc) *Pipeline {
 	return p
 }
 
+func (p *Pipeline) Error(error ErrorFunc) *Pipeline {
+	p.layers[len(p.layers)-1].error = error
+	return p
+}
+
+func (p *Pipeline) NoError(noError NoErrorFunc) *Pipeline {
+	p.layers[len(p.layers)-1].noError = noError
+	return p
+}
+
 func (p *Pipeline) After(after InvokeFunc) *Pipeline {
 	p.layers[len(p.layers)-1].after = after
 	return p
@@ -124,33 +138,43 @@ func (p *Pipeline) Run(errFunc ErrFunc) {
 			p.err = nil
 			continue
 		}
-		if p.err == nil && len(layer.funcs) > 0 {
 
-			if layer.before != nil {
-				layer.before()
-			}
+		if p.err != nil || len(layer.funcs) == 0 {
+			continue
+		}
 
-			p.err = p.process(layer.funcs...)
-			if p.err != nil && layer.thenCatcher != nil {
-				p.err = p.intercept(layer.thenCatcher)
-			}
+		if layer.before != nil {
+			layer.before()
+		}
+
+		p.err = p.process(layer.funcs...)
+		if p.err != nil && layer.thenCatcher != nil {
+			p.err = layer.thenCatcher(p.err)
+		}
+
+		if len(layer.fallbacks) > 0 {
 			if p.err != nil && len(layer.fallbacks) > 0 {
 				p.err = p.process(layer.fallbacks...)
+				if p.err != nil && layer.elseCatcher != nil {
+					p.err = layer.elseCatcher(p.err)
+				}
 			}
-			if p.err != nil && layer.elseCatcher != nil {
-				p.err = p.intercept(layer.elseCatcher)
-			}
-
-			if layer.after != nil {
-				layer.after()
-			}
-
 		}
+
+		if p.err != nil && layer.error != nil {
+			p.err = layer.error(p.err)
+		}
+		if p.err == nil && layer.noError != nil {
+			p.err = layer.noError()
+		}
+
+		if layer.after != nil {
+			layer.after()
+		}
+
 	}
 	errFunc(p.err)
 }
-
-func (p *Pipeline) intercept(interceptor CatchFunc) error { return interceptor(p.err) }
 
 func (p *Pipeline) process(funcs ...Func) error {
 	errCh := make(chan error)
@@ -177,23 +201,43 @@ func (p *Pipeline) String() string {
 	var info strings.Builder
 	info.WriteString("Pipeline: {\n")
 	for i, layer := range p.layers {
-		var layerInfo string
-		if layer.reset {
-			layerInfo = "reset"
-		} else {
-			// catchers
-			layerInfo = fmt.Sprintf("before: %5t, then: %2d, thenCatcher: %5t, else: %2d, elseCatcher: %5t, after: %5t",
-				layer.before != nil,
-				len(layer.funcs), layer.thenCatcher != nil,
-				len(layer.fallbacks), layer.elseCatcher != nil,
-				layer.after != nil,
-			)
-		}
-		info.WriteString(fmt.Sprintf("[%2d]: %s\n", i, layerInfo))
+		info.WriteString(fmt.Sprintf("  [%2d]: %s\n", i, layer.String()))
 	}
 	if p.err != nil {
-		info.WriteString(fmt.Sprintf("error: %q\n", p.err.Error()))
+		info.WriteString(fmt.Sprintf("  error: %q\n", p.err.Error()))
 	}
 	info.WriteString("}")
 	return info.String()
+}
+
+func (layer *layer) String() string {
+	var layerInfo string
+	if layer.reset {
+		layerInfo = "reset"
+	} else {
+		layerInfo = fmt.Sprintf("before: %s, then: %2d%s, else: %2d%s, error: %s, noError: %s, after: %s",
+			ifThen(layer.before != nil, "+", "-"),
+			len(layer.funcs), ifFmt(layer.thenCatcher != nil, " +catcher"),
+			len(layer.fallbacks), ifFmt(layer.elseCatcher != nil, " +catcher"),
+			ifThen(layer.error != nil, "+", "-"),
+			ifThen(layer.noError != nil, "+", "-"),
+			ifThen(layer.after != nil, "+", "-"),
+		)
+	}
+	return layerInfo
+}
+
+func ifThen(t bool, trueStr, falseStr string) string {
+	if t {
+		return trueStr
+	} else {
+		return falseStr
+	}
+}
+
+func ifFmt(t bool, format string, args ...any) string {
+	if !t {
+		return ""
+	}
+	return fmt.Sprintf(format, args...)
 }

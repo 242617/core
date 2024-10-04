@@ -127,7 +127,7 @@ func TestContextCancel(t *testing.T) {
 			Then(first.Call, second.Call).
 			Then(third.Call).
 			Run(func(err error) {
-				assert.Equal(t, "context canceled", err.Error(), "context canceled")
+				require.Equal(t, "context canceled", err.Error(), "context canceled")
 			})
 		assert.Equal(t, 0, third.Called(), "third never called")
 	}
@@ -232,37 +232,78 @@ func TestBeforeAndAfter(t *testing.T) {
 		Run(func(err error) {
 			require.NoError(t, err, "expect no error")
 		})
+}
 
+func TestErrorNoError(t *testing.T) {
+	{
+		first := withEmpty{}
+		second, third := withCallCounter{}, withCallCounter{}
+		fourthErr := errors.New("fourth")
+		fourth, fifth := withError{fourthErr}, withCallCounter{}
+		pipeline.New(context.Background()).
+			Then(first.Call).
+			Error(func(err error) error { return second.Call(context.Background()) }).
+			NoError(func() error { return third.Call(context.Background()) }).
+			Then(fourth.Call).
+			Then(fifth.Call).
+			Run(func(err error) {
+				require.ErrorIs(t, err, fourthErr, "fourth error")
+			})
+		assert.Equal(t, 0, second.Called(), "second never called")
+		assert.Equal(t, 1, third.Called(), "third called once")
+		assert.Equal(t, 0, fifth.Called(), "fifth never called")
+	}
+	{
+		firstErr := errors.New("first")
+		first := withError{firstErr}
+		second, third := withCallCounter{}, withCallCounter{}
+		pipeline.New(context.Background()).
+			Then(first.Call).
+			Error(func(err error) error {
+				require.ErrorIs(t, err, firstErr, "first error")
+				return nil
+			}).
+			NoError(func() error { return second.Call(context.Background()) }).
+			Then(third.Call).
+			Run(func(err error) {
+				require.NoError(t, err, "expect no error")
+			})
+		assert.Equal(t, 1, second.Called(), "second called once")
+		assert.Equal(t, 1, third.Called(), "third called once")
+	}
 }
 
 func TestCatches(t *testing.T) {
-	var one, two bool
-	firstErr, secondErr := errors.New("first"), errors.New("second")
-	first, second := withError{firstErr}, withError{secondErr}
-	third := withCallCounter{}
-	pipeline.New(context.Background()).
-		Then(first.Call).
-		ThenCatch(func(err error) error {
-			one = true
-			return err
-		}).
-		Else(second.Call).
-		ElseCatch(func(err error) error {
-			two = true
-			return err
-		}).
-		Then(third.Call).
-		Run(func(err error) {
-			require.ErrorIs(t, err, secondErr, "second error")
-		})
-	assert.Equal(t, 0, third.Called(), "third never called")
-	assert.True(t, one, "unexpected one value")
-	assert.True(t, two, "unexpected two value")
+	{
+		var one, two bool
+		firstErr, secondErr := errors.New("first"), errors.New("second")
+		first, second := withError{firstErr}, withError{secondErr}
+		third := withCallCounter{}
+		pipeline.New(context.Background()).
+			Then(first.Call).
+			ThenCatch(func(err error) error {
+				one = true
+				return err
+			}).
+			Else(second.Call).
+			ElseCatch(func(err error) error {
+				two = true
+				return err
+			}).
+			Then(third.Call).
+			Run(func(err error) {
+				require.ErrorIs(t, err, secondErr, "second error")
+			})
+		assert.Equal(t, 0, third.Called(), "third never called")
+		assert.True(t, one, "unexpected one value")
+		assert.True(t, two, "unexpected two value")
+	}
 
 	{
 		firstBefore, firstAfter := withCallCounter{}, withCallCounter{}
 		firstErr := errors.New("first")
 		first := withError{firstErr}
+		firstElseCatch := withCallCounter{}
 		secondBefore, secondAfter := withCallCounter{}, withCallCounter{}
 		second := withCallCounter{}
 		secondThenCatch := withCallCounter{}
@@ -272,6 +313,10 @@ func TestCatches(t *testing.T) {
 			ThenCatch(func(err error) error {
 				require.ErrorIs(t, err, firstErr, "unexpected first error")
 				return err
+			}).
+			ElseCatch(func(error) error {
+				firstElseCatch.Call(context.Background())
+				return nil
 			}).
 			After(func() { firstAfter.Call(context.Background()) }).
 			///
@@ -286,6 +331,7 @@ func TestCatches(t *testing.T) {
 				require.ErrorIs(t, err, firstErr, "first error")
 			})
 		assert.Equal(t, 1, firstBefore.Called(), "firstBefore called once")
+		assert.Equal(t, 0, firstElseCatch.Called(), "firstAfter never called")
 		assert.Equal(t, 1, firstAfter.Called(), "firstAfter called once")
 		assert.Equal(t, 0, secondBefore.Called(), "secondBefore never called")
 		assert.Equal(t, 0, second.Called(), "second never called")

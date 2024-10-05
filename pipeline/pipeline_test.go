@@ -348,6 +348,51 @@ func TestCatches(t *testing.T) {
 	}
 }
 
+func TestAppend(t *testing.T) {
+	var numbers []string
+	p1 := pipeline.New(context.Background()).
+		Then(func(ctx context.Context) error {
+			numbers = append(numbers, "one")
+			return nil
+		})
+	p2 := pipeline.New(context.Background()).
+		Then(func(ctx context.Context) error {
+			numbers = append(numbers, "two")
+			return nil
+		})
+	p3 := pipeline.New(context.Background()).
+		Then(func(ctx context.Context) error {
+			numbers = append(numbers, "three")
+			return nil
+		})
+	fourthErr := errors.New("fourth")
+	p4 := pipeline.New(context.Background()).
+		Then(func(ctx context.Context) error {
+			numbers = append(numbers, "four")
+			return fourthErr
+		})
+
+	p1.Append(p2, p3).
+		Run(func(err error) {
+			require.NoError(t, err, "no error")
+			require.Equal(t, "one,two,three", strings.Join(numbers, ","), "unexpected after appending p2 and p3")
+		})
+	numbers = []string{}
+
+	p1.Append(p4).
+		Run(func(err error) {
+			require.ErrorIs(t, err, fourthErr, "unexpected error after appending p4")
+			require.Equal(t, "one,four", strings.Join(numbers, ","), "unexpected after appending p4")
+		})
+	numbers = []string{}
+
+	p1.Run(func(err error) {
+		require.NoError(t, err, "no error")
+		require.Equal(t, "one", strings.Join(numbers, ","), "unexpected p1")
+	})
+	numbers = []string{}
+}
+
 type (
 	withEmpty        struct{}
 	withError        struct{ err error }

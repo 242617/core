@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"golang.org/x/sync/errgroup"
 )
@@ -80,6 +81,7 @@ type (
 	ErrorFunc   = func(error) error
 	NoErrorFunc = func() error
 	Pipeline    struct {
+		mu     sync.Mutex
 		ctx    context.Context
 		err    error
 		layers []layer
@@ -205,6 +207,22 @@ func (p *Pipeline) process(funcs ...Func) error {
 	case err = <-errCh:
 	}
 	return err
+}
+
+func (p *Pipeline) Append(pipilines ...*Pipeline) *Pipeline {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	layers := append([]layer{}, p.layers...)
+	for _, item := range pipilines {
+		layers = append(layers, item.layers...)
+	}
+
+	return NewWithOptions(
+		WithContext(p.ctx),
+		withError(p.err),
+		withLayers(layers...),
+	)
 }
 
 func (p *Pipeline) String() string {

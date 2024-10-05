@@ -393,6 +393,34 @@ func TestAppend(t *testing.T) {
 	numbers = []string{}
 }
 
+func TestMerge(t *testing.T) {
+	var numbers []string
+	p1 := pipeline.New(context.Background()).
+		Then(func(ctx context.Context) error {
+			numbers = append(numbers, "one")
+			return nil
+		}).Name("one")
+
+	tail := func(name string) *pipeline.Pipeline {
+		return pipeline.New(context.Background()).
+			Then(func(ctx context.Context) error {
+				numbers = append(numbers, name)
+				return nil
+			}).Name(name)
+	}
+
+	p1.
+		Then(func(ctx context.Context) error {
+			numbers = append(numbers, "two")
+			return nil
+		}).Name("two").
+		Merge(func() *pipeline.Pipeline { return tail("three") }).
+		Run(func(err error) {
+			require.NoError(t, err, "no error")
+			assert.Equal(t, "one,two,three", strings.Join(numbers, ","), "unexpected")
+		})
+}
+
 type (
 	withEmpty        struct{}
 	withError        struct{ err error }

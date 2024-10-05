@@ -9,16 +9,6 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func NewWithOptions(options ...option) *Pipeline {
-	p := Pipeline{
-		layers: make([]layer, 1),
-	}
-	for _, option := range options {
-		option(&p)
-	}
-	return &p
-}
-
 /*
 New creates pipeline that call functions in this order:
   - Before
@@ -71,7 +61,15 @@ func New(ctx context.Context, funcs ...Func) *Pipeline {
 	return NewWithOptions(WithContext(ctx)).Then(funcs...)
 }
 
-// TODO: Add concurrency control
+func NewWithOptions(options ...option) *Pipeline {
+	p := Pipeline{
+		layers: make([]layer, 1),
+	}
+	for _, option := range options {
+		option(&p)
+	}
+	return &p
+}
 
 type (
 	Func        = func(context.Context) error
@@ -81,20 +79,27 @@ type (
 	ErrorFunc   = func(error) error
 	NoErrorFunc = func() error
 	Pipeline    struct {
-		mu     sync.Mutex
+		mu     sync.Mutex // TODO: Add concurrency control
 		ctx    context.Context
 		err    error
 		layers []layer
 	}
 	layer struct {
+		name                     string
 		funcs, fallbacks         []Func
 		thenCatcher, elseCatcher CatchFunc
 		before, after            InvokeFunc
 		error                    ErrorFunc
 		noError                  NoErrorFunc
+		merge                    func() *Pipeline
 		reset                    bool
 	}
 )
+
+func (p *Pipeline) Name(name string) *Pipeline {
+	p.layers[len(p.layers)-1].name = name
+	return p
+}
 
 func (p *Pipeline) Before(before InvokeFunc) *Pipeline {
 	if p.layers[len(p.layers)-1].funcs != nil {
@@ -144,6 +149,11 @@ func (p *Pipeline) After(after InvokeFunc) *Pipeline {
 	return p
 }
 
+func (p *Pipeline) Merge(merge func() *Pipeline) *Pipeline {
+	p.layers[len(p.layers)-1].merge = merge
+	return p
+}
+
 func (p *Pipeline) Run(errFunc ErrFunc) {
 	for _, layer := range p.layers {
 		if layer.reset {
@@ -171,6 +181,12 @@ func (p *Pipeline) Run(errFunc ErrFunc) {
 					p.err = layer.elseCatcher(p.err)
 				}
 			}
+		}
+
+		if layer.merge != nil {
+			errCh := make(chan error)
+			go layer.merge().Run(func(err error) { errCh <- err })
+			p.err = <-errCh
 		}
 
 		if p.err != nil && layer.error != nil {
@@ -243,7 +259,8 @@ func (layer *layer) String() string {
 	if layer.reset {
 		layerInfo = "reset"
 	} else {
-		layerInfo = fmt.Sprintf("before: %s, then: %2d%s, else: %2d%s, error: %s, noError: %s, after: %s",
+		layerInfo = fmt.Sprintf("name: %-10s, before: %s, then: %2d%s, else: %2d%s, error: %s, noError: %s, after: %s",
+			layer.name,
 			ifThen(layer.before != nil, "+", "-"),
 			len(layer.funcs), ifFmt(layer.thenCatcher != nil, " +catcher"),
 			len(layer.fallbacks), ifFmt(layer.elseCatcher != nil, " +catcher"),

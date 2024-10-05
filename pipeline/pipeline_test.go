@@ -206,7 +206,7 @@ func TestAll(t *testing.T) {
 func TestBeforeAndAfter(t *testing.T) {
 	first, second, third := withCallCounter{}, withCallCounter{}, withCallCounter{}
 	pipeline.New(context.Background()).
-		Before(func() { first.Call(context.Background()) }).
+		Before(func() { _ = first.Call(context.Background()) }).
 		Before(func() {
 			assert.Equal(t, 0, first.Called(), "first never called")
 			assert.Equal(t, 0, second.Called(), "second never called")
@@ -308,25 +308,18 @@ func TestCatches(t *testing.T) {
 		second := withCallCounter{}
 		secondThenCatch := withCallCounter{}
 		pipeline.New(context.Background()).
-			Before(func() { firstBefore.Call(context.Background()) }).
+			Before(func() { _ = firstBefore.Call(context.Background()) }).
 			Then(first.Call).
 			ThenCatch(func(err error) error {
 				require.ErrorIs(t, err, firstErr, "unexpected first error")
 				return err
 			}).
-			ElseCatch(func(error) error {
-				firstElseCatch.Call(context.Background())
-				return nil
-			}).
-			After(func() { firstAfter.Call(context.Background()) }).
-			///
-			Before(func() { secondBefore.Call(context.Background()) }).
+			ElseCatch(func(error) error { return firstElseCatch.Call(context.Background()) }).
+			After(func() { _ = firstAfter.Call(context.Background()) }).
+			Before(func() { _ = secondBefore.Call(context.Background()) }).
 			Then(second.Call).
-			ThenCatch(func(err error) error {
-				secondThenCatch.Call(context.Background())
-				return err
-			}).
-			After(func() { secondAfter.Call(context.Background()) }).
+			ThenCatch(func(err error) error { return secondThenCatch.Call(context.Background()) }).
+			After(func() { _ = secondAfter.Call(context.Background()) }).
 			Run(func(err error) {
 				require.ErrorIs(t, err, firstErr, "first error")
 			})

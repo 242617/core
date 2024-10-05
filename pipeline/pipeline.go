@@ -25,6 +25,8 @@ New creates pipeline that call functions in this order:
   - ThenCatch
   - Else
   - ElseCatch
+  - Error
+  - NoError
   - After
   - Run
 
@@ -49,9 +51,17 @@ Example:
 			fmt.Println("5. else catch")
 			return err
 		}).
-		After(func() { fmt.Println("6. after") }).
+		Error(func(err error) error {
+			fmt.Println("6. error")
+			return nil
+		}).
+		NoError(func() error {
+			fmt.Println("7. no error")
+			return nil
+		}).
+		After(func() { fmt.Println("68 after") }).
 		Run(func(err error) {
-			fmt.Println("7. run")
+			fmt.Println("9. run")
 			errCh <- err
 		})
 	fmt.Println(<-errCh)

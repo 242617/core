@@ -26,6 +26,12 @@ func WithStartTimeout(timeout time.Duration) option {
 		return nil
 	}
 }
+func WithStopTimeout(timeout time.Duration) option {
+	return func(a *Application) error {
+		a.stopTimeout = timeout
+		return nil
+	}
+}
 
 func withDefaultLogger() option {
 	return func(a *Application) error {

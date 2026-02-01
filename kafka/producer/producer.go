@@ -11,137 +11,68 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
-// clientWrapper wraps franz-go client with additional functionality.
-type clientWrapper struct {
-	client  *kgo.Client
-	brokers []string
-	topic   string
-	logger  protocol.Logger
+// Producer publishes messages to Kafka with async and sync modes.
+// Safe for concurrent use. Implements protocol.Lifecycle.
+type Producer struct {
+	client KafkaProducer
+	topic  string
+	logger protocol.Logger
 
 	mu     sync.RWMutex
 	closed bool
 }
 
-// isClosed returns true if the client is closed.
-func (cw *clientWrapper) isClosed() bool {
-	cw.mu.RLock()
-	defer cw.mu.RUnlock()
-	return cw.closed
-}
-
-// close closes the client gracefully.
-// The method is idempotent and safe to call multiple times.
-func (cw *clientWrapper) close(ctx context.Context) error {
-	cw.mu.Lock()
-	defer cw.mu.Unlock()
-
-	if cw.closed {
-		return nil
-	}
-
-	cw.closed = true
-	cw.client.Close()
-	cw.logger.Info(ctx, "kafka client closed", "brokers", cw.brokers)
-	return nil
-}
-
-// Producer provides methods for publishing messages to Kafka.
-// It supports both async (Produce) and sync (ProduceSync) modes.
-//
-// The Producer is safe for concurrent use from multiple goroutines.
-//
-// Example usage with options:
-//
-//	producer, err := producer.New(
-//	    producer.WithBrokers("localhost:9092"),
-//	    producer.WithTopic("my-topic"),
-//	    producer.WithLogger(log.New("kafka")),
-//	)
-//	if err != nil {
-//	    return err
-//	}
-//	defer producer.Stop(ctx)
-//
-//	// Async produce
-//	producer.Produce(ctx, kafka.Message{
-//	    Key:   []byte("key"),
-//	    Value: []byte("value"),
-//	}, func(msg *kafka.Message, err error) {
-//	    if err != nil {
-//	        log.Printf("produce failed: %v", err)
-//	        return
-//	    }
-//	    log.Printf("message produced: topic=%s partition=%d offset=%d",
-//	        msg.Topic, msg.Partition, msg.Offset)
-//	})
-type Producer struct {
-	client *clientWrapper
-	logger protocol.Logger
-}
-
-// New creates a new Kafka producer client with options.
+// New creates a new Kafka producer with the provided options.
 func New(options ...Option) (*Producer, error) {
-	// Create default config
 	cfg := &Config{}
 
-	// Apply defaults
-	for _, option := range defaults() {
-		if err := option(cfg); err != nil {
-			return nil, fmt.Errorf("apply default option: %w", err)
-		}
-	}
-
-	// Apply user options
-	for _, option := range options {
+	// Apply defaults then user options
+	for _, option := range append(defaults(), options...) {
 		if err := option(cfg); err != nil {
 			return nil, fmt.Errorf("apply option: %w", err)
 		}
 	}
 
-	// Validate final configuration
 	if err := cfg.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid producer config: %w", err)
+		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
-	// Build franz-go options
-	opts := []kgo.Opt{
-		kgo.SeedBrokers(cfg.Brokers...),
-	}
-
-	client, err := kgo.NewClient(opts...)
-	if err != nil {
-		return nil, fmt.Errorf("create kafka client: %w", err)
-	}
-
-	cw := &clientWrapper{
-		client:  client,
-		brokers: cfg.Brokers,
-		topic:   cfg.Topic,
-		logger:  cfg.Logger,
+	// Use custom producer if provided (for testing), otherwise create real one
+	var client KafkaProducer
+	if cfg.producer != nil {
+		client = cfg.producer
+	} else {
+		kgoClient, err := kgo.NewClient(kgo.SeedBrokers(cfg.Brokers...))
+		if err != nil {
+			return nil, fmt.Errorf("create kafka client: %w", err)
+		}
+		client = NewRealProducer(kgoClient)
 	}
 
 	return &Producer{
-		client: cw,
+		client: client,
+		topic:  cfg.Topic,
 		logger: cfg.Logger,
 	}, nil
 }
 
-// Produce sends a message asynchronously.
-// The callback is invoked when the message is successfully produced or fails.
-//
-// If the producer is closed, the callback will be invoked with kafka.ErrClosed immediately.
+// Produce sends a message asynchronously. Callback is invoked on completion or error.
+// If producer is closed, callback receives kafka.ErrClosed immediately.
 func (p *Producer) Produce(ctx context.Context, msg kafka.Message, callback func(*kafka.Message, error)) {
-	if p.client.isClosed() {
+	p.mu.RLock()
+	if p.closed {
+		p.mu.RUnlock()
 		if callback != nil {
 			callback(&msg, kafka.ErrClosed)
 		}
 		return
 	}
+	p.mu.RUnlock()
 
 	start := time.Now()
 	topic := msg.Topic
 	if topic == "" {
-		topic = p.client.topic
+		topic = p.topic
 	}
 
 	record := &kgo.Record{
@@ -151,7 +82,7 @@ func (p *Producer) Produce(ctx context.Context, msg kafka.Message, callback func
 		Value:     msg.Value,
 	}
 
-	// Add headers
+	// Convert headers
 	if len(msg.Headers) > 0 {
 		record.Headers = make([]kgo.RecordHeader, len(msg.Headers))
 		for i, h := range msg.Headers {
@@ -159,21 +90,20 @@ func (p *Producer) Produce(ctx context.Context, msg kafka.Message, callback func
 		}
 	}
 
-	p.client.client.Produce(ctx, record, func(r *kgo.Record, err error) {
+	p.client.Produce(ctx, record, func(r *kgo.Record, err error) {
 		latency := time.Since(start)
-		success := err == nil
 
-		if success {
-			p.logger.Debug(ctx, "message produced successfully",
+		if err == nil {
+			p.logger.Debug(ctx, "message produced",
 				"topic", r.Topic,
 				"partition", r.Partition,
 				"offset", r.Offset,
 				"latency_ms", latency.Milliseconds())
 		} else {
-			p.logger.Error(ctx, "message produce failed",
+			p.logger.Error(ctx, "produce failed",
 				"topic", topic,
-				"err", err,
-				"latency_ms", latency.Milliseconds())
+				"latency_ms", latency.Milliseconds(),
+				"err", err)
 		}
 
 		if callback != nil {
@@ -192,9 +122,13 @@ func (p *Producer) Produce(ctx context.Context, msg kafka.Message, callback func
 }
 
 // ProduceSync sends messages synchronously, waiting for all to complete.
-// Returns the first error if any messages failed.
+// Returns the first error encountered, if any.
 func (p *Producer) ProduceSync(ctx context.Context, msgs ...kafka.Message) error {
-	if p.client.isClosed() {
+	p.mu.RLock()
+	closed := p.closed
+	p.mu.RUnlock()
+
+	if closed {
 		return kafka.ErrClosed
 	}
 
@@ -206,7 +140,7 @@ func (p *Producer) ProduceSync(ctx context.Context, msgs ...kafka.Message) error
 	for i, msg := range msgs {
 		topic := msg.Topic
 		if topic == "" {
-			topic = p.client.topic
+			topic = p.topic
 		}
 
 		records[i] = &kgo.Record{
@@ -216,7 +150,7 @@ func (p *Producer) ProduceSync(ctx context.Context, msgs ...kafka.Message) error
 			Value:     msg.Value,
 		}
 
-		// Add headers
+		// Convert headers
 		if len(msg.Headers) > 0 {
 			records[i].Headers = make([]kgo.RecordHeader, len(msg.Headers))
 			for j, h := range msg.Headers {
@@ -226,22 +160,15 @@ func (p *Producer) ProduceSync(ctx context.Context, msgs ...kafka.Message) error
 	}
 
 	start := time.Now()
-	results := p.client.client.ProduceSync(ctx, records...)
+	results := p.client.ProduceSync(ctx, records...)
 	latency := time.Since(start)
 
 	if err := results.FirstErr(); err != nil {
 		p.logger.Error(ctx, "sync produce failed",
 			"count", len(msgs),
-			"err", err,
-			"latency_ms", latency.Milliseconds())
+			"latency_ms", latency.Milliseconds(),
+			"err", err)
 		return fmt.Errorf("produce messages: %w", err)
-	}
-
-	for _, result := range results {
-		p.logger.Debug(ctx, "message produced successfully",
-			"topic", result.Record.Topic,
-			"partition", result.Record.Partition,
-			"offset", result.Record.Offset)
 	}
 
 	p.logger.Debug(ctx, "sync produce completed",
@@ -251,26 +178,25 @@ func (p *Producer) ProduceSync(ctx context.Context, msgs ...kafka.Message) error
 	return nil
 }
 
-// Close closes the producer gracefully.
-// The method is idempotent and safe to call multiple times.
-func (p *Producer) Close(ctx context.Context) error {
-	if p.client.isClosed() {
-		return nil
-	}
-
-	p.logger.Info(ctx, "closing producer", "brokers", p.client.brokers)
-	return p.client.close(ctx)
-}
-
-// Start is a no-op for the producer as it's ready to produce immediately after creation.
-// This method implements protocol.Lifecycle interface.
+// Start is a no-op (producer is ready immediately). Implements protocol.Lifecycle.
 func (p *Producer) Start(ctx context.Context) error {
-	p.logger.Debug(ctx, "producer started (ready to produce)")
+	p.logger.Debug(ctx, "producer ready")
 	return nil
 }
 
-// Stop stops the producer by closing it.
-// This method implements protocol.Lifecycle interface.
+// Stop closes the producer gracefully. Implements protocol.Lifecycle.
+// Idempotent and safe to call multiple times.
 func (p *Producer) Stop(ctx context.Context) error {
-	return p.Close(ctx)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.closed {
+		return nil
+	}
+
+	p.closed = true
+	p.client.Close()
+	p.logger.Info(ctx, "producer stopped")
+
+	return nil
 }

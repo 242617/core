@@ -25,6 +25,9 @@ type Config struct {
 
 	// Logger is the logger for structured logging (optional, uses DefaultLogger).
 	Logger protocol.Logger `yaml:"-"`
+
+	// producer is the Kafka producer implementation (optional, primarily for testing).
+	producer KafkaProducer `yaml:"-"`
 }
 
 // Validate checks the configuration for errors.
@@ -77,6 +80,15 @@ func WithLogger(logger protocol.Logger) Option {
 			return stderrors.New("logger cannot be nil")
 		}
 		cfg.Logger = logger
+		return nil
+	}
+}
+
+// WithKafkaProducer sets a custom Kafka producer implementation.
+// This is primarily used for testing with mock implementations.
+func WithKafkaProducer(p KafkaProducer) Option {
+	return func(cfg *Config) error {
+		cfg.producer = p
 		return nil
 	}
 }

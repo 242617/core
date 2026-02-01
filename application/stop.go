@@ -2,35 +2,60 @@ package application
 
 import (
 	"context"
-
-	"github.com/pkg/errors"
+	"errors"
+	"time"
 )
 
+// stop shuts down components in reverse order.
 func (a *Application) stop(ctx context.Context) error {
-	a.log.Info().Msgf("stopping %s", Name)
+	a.log.Info(ctx, "stopping application")
 
-	okCh, errCh := make(chan struct{}), make(chan error)
-	go func() {
-		for i := len(a.components) - 1; i >= 0; i-- {
-			c := a.components[i]
-			a.log.Info().Msgf("stopping %q...", c)
-			if err := c.Stop(ctx); err != nil {
-				a.log.Error().Err(err).Msgf("cannot stop %q", c)
-				errCh <- errors.Wrapf(err, "cannot stop %q", c)
-				return
-			}
+	var errs []error
+
+	for i := len(a.components) - 1; i >= 0; i-- {
+		c := a.components[i]
+
+		a.log.Debug(ctx, "stopping component", "component", c.String())
+
+		startTime := time.Now()
+		err := c.Stop(ctx)
+		duration := time.Since(startTime)
+
+		if err != nil {
+			a.log.Error(ctx, "error stopping component", err,
+				"component", c.String(),
+				"duration", duration,
+			)
+			errs = append(errs, &ComponentError{
+				Component: c.String(),
+				Phase:     ComponentPhaseStop,
+				Err:       err,
+			})
+		} else {
+			a.log.Debug(ctx, "component stopped",
+				"component", c.String(),
+				"duration", duration,
+			)
 		}
-		okCh <- struct{}{}
+	}
+
+	done := make(chan struct{})
+	go func() {
+		a.wg.Wait()
+		close(done)
 	}()
 
 	select {
+	case <-done:
 	case <-ctx.Done():
-		return errors.New("stop timeout")
-	case err := <-errCh:
-		return err
-	case <-okCh:
+		a.log.Warn(ctx, "shutdown timeout, some goroutines may still be running")
 	}
 
-	a.log.Info().Msg("application stopped")
+	a.log.Info(ctx, "application stopped")
+
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+
 	return nil
 }

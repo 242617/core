@@ -1,14 +1,16 @@
 package file
 
 import (
-	"io/ioutil"
+	"fmt"
+	"os"
+	"reflect"
 
-	yaml2 "gopkg.in/yaml.v2"
+	yamlv3 "gopkg.in/yaml.v3"
 
 	"github.com/242617/core/config/source"
 )
 
-// YAML creates config source that fills config with values from yaml-file
+// YAML loads struct fields from a YAML file.
 func YAML(file string) source.ConfigSource {
 	return &yaml{file}
 }
@@ -16,12 +18,17 @@ func YAML(file string) source.ConfigSource {
 type yaml struct{ file string }
 
 func (y *yaml) Scan(p interface{}) error {
-	barr, err := ioutil.ReadFile(y.file)
+	v := reflect.ValueOf(p)
+	if v.Kind() != reflect.Ptr || v.IsNil() {
+		return fmt.Errorf("unexpected kind: %q", v.Kind())
+	}
+
+	data, err := os.ReadFile(y.file)
 	if err != nil {
 		return err
 	}
 
-	if err = yaml2.Unmarshal(barr, p); err != nil {
+	if err = yamlv3.Unmarshal(data, p); err != nil {
 		return err
 	}
 

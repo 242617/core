@@ -1,0 +1,12 @@
+db:
+  host: 0.0.0.0
+  port: 5432
+  schema: public
+  user: postgres
+  password: password
+  name: test
+raw_messages:
+  brokers:
+    - 0.0.0.0:9092
+  topic: sample
+  group_id: sample_group_1

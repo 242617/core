@@ -1,6 +1,6 @@
 package source
 
-// ConfigSource is an interface for config source
+// ConfigSource provides values to scan into a config struct.
 type ConfigSource interface {
 	Scan(p interface{}) error
 }

@@ -3,116 +3,75 @@ package application
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/pkg/errors"
-	"github.com/rs/zerolog"
-	l "github.com/rs/zerolog/log"
 
 	"github.com/242617/core/protocol"
 )
 
-type option = func(a *Application) error
-
-func withDefaultTimeouts() option {
-	return func(a *Application) error {
-		a.startTimeout, a.stopTimeout = time.Second, time.Second
-		return nil
-	}
-}
-func WithStartTimeout(timeout time.Duration) option {
-	return func(a *Application) error {
-		a.startTimeout = timeout
-		return nil
-	}
-}
-func WithStopTimeout(timeout time.Duration) option {
-	return func(a *Application) error {
-		a.stopTimeout = timeout
-		return nil
-	}
+// Application manages component lifecycle with graceful shutdown and timeout handling.
+type Application struct {
+	log          protocol.Logger
+	startTimeout time.Duration
+	stopTimeout  time.Duration
+	components   Components
+	ctx          context.Context
+	cancel       context.CancelFunc
+	wg           sync.WaitGroup
+	started      bool
+	startedMu    sync.RWMutex
+	stopCh       chan struct{} // For programmatic shutdown
+	hostname     string
+	name         string
 }
 
-func withDefaultLogger() option {
-	return func(a *Application) error {
-		a.log = l.With().Str("component", "application").Logger()
-		return nil
-	}
-}
+// New creates Application with defaults and custom options.
+func New(options ...Option) (*Application, error) {
+	ctx, cancel := context.WithCancel(context.Background())
 
-func WithComponents(components ...Component) option {
-	return func(a *Application) error {
-		a.components = components
-		return nil
+	app := &Application{
+		ctx:    ctx,
+		cancel: cancel,
+		stopCh: make(chan struct{}, 1),
 	}
-}
 
-func New(options ...option) (*Application, error) {
-	var a Application
-	options = append([]option{
-		withDefaultTimeouts(),
-		withDefaultLogger(),
-	}, options...)
-	for _, option := range options {
-		if err := option(&a); err != nil {
-			return nil, errors.New("apply option")
+	for _, option := range append(defaults(), options...) {
+		if err := option(app); err != nil {
+			return nil, fmt.Errorf("apply option: %w", err)
 		}
 	}
-	return &a, nil
-}
 
-type Application struct {
-	startTimeout, stopTimeout time.Duration
-	log                       zerolog.Logger
-	components                []Component
-}
-
-type Component interface {
-	fmt.Stringer
-	protocol.Lifecycle
-}
-
-func NewLifecycleComponent(name string, cmp protocol.Lifecycle) *LifecycleComponent {
-	return &LifecycleComponent{name, cmp}
-}
-
-type LifecycleComponent struct {
-	string
-	protocol.Lifecycle
-}
-
-func (s *LifecycleComponent) String() string { return s.string }
-
-type ContextFunc = func(context.Context) error
-
-type MethodsComponent struct {
-	name        string
-	start, stop ContextFunc
-}
-
-func NewMethodsComponent(name string, start, stop ContextFunc) MethodsComponent {
-	return MethodsComponent{
-		name:  name,
-		start: start,
-		stop:  stop,
+	for i, c := range app.components {
+		if c == nil {
+			return nil, fmt.Errorf("component at index %d is nil", i)
+		}
 	}
-}
 
-func (c MethodsComponent) Start(ctx context.Context) error { return c.call(ctx, c.start) }
-func (c MethodsComponent) Stop(ctx context.Context) error  { return c.call(ctx, c.stop) }
-
-func (c MethodsComponent) call(ctx context.Context, f ContextFunc) error {
-	if f == nil {
-		return nil
+	if app.log == nil {
+		return nil, errors.New("empty log")
 	}
-	return f(ctx)
+	if app.startTimeout == 0 {
+		return nil, errors.New("empty start timeout")
+	}
+	if app.stopTimeout == 0 {
+		return nil, errors.New("empty stop timeout")
+	}
+	if app.hostname == "" {
+		return nil, errors.New("empty hostname")
+	}
+	if app.name == "" {
+		return nil, errors.New("empty name")
+	}
+
+	return app, nil
 }
 
-func (c MethodsComponent) String() string { return c.name }
-
-func PlainToContextFunc(f func()) ContextFunc {
-	return func(context.Context) error {
-		f()
-		return nil
+// Exit triggers graceful shutdown. Safe to call multiple times.
+func (a *Application) Exit() {
+	select {
+	case a.stopCh <- struct{}{}:
+	default:
 	}
 }

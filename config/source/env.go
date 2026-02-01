@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// Env creates config source that fills config from environment variables
+// Env fills struct fields from environment variables using `env` tags.
 func Env() ConfigSource {
 	return &env{}
 }
@@ -26,14 +26,12 @@ func (e *env) Scan(p interface{}) error {
 
 func (e *env) describe(v reflect.Value) error {
 	for i := 0; i < v.NumField(); i++ {
-
 		vf := v.Field(i)
 		tf := v.Type().Field(i)
 		tag := tf.Tag.Get("env")
 
 		if vf.Kind() == reflect.Struct {
-			err := e.describe(vf)
-			if err != nil {
+			if err := e.describe(vf); err != nil {
 				return err
 			}
 			continue
@@ -45,20 +43,18 @@ func (e *env) describe(v reflect.Value) error {
 		}
 
 		switch vf.Kind() {
-
 		case reflect.String:
 			vf.SetString(val)
 
 		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 			if vf.Kind() == reflect.Int64 && vf.Type() == reflect.TypeOf(time.Nanosecond) {
-				v, err := time.ParseDuration(val)
+				dur, err := time.ParseDuration(val)
 				if err != nil {
 					return err
 				}
-				vf.Set(reflect.ValueOf(v))
+				vf.Set(reflect.ValueOf(dur))
 				continue
 			}
-
 			i, err := strconv.ParseInt(val, 10, 64)
 			if err != nil {
 				return err
@@ -85,7 +81,6 @@ func (e *env) describe(v reflect.Value) error {
 		default:
 			return fmt.Errorf("unsupported type: %q", vf.Kind())
 		}
-
 	}
 
 	return nil

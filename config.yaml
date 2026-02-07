@@ -5,8 +5,12 @@ db:
   user: postgres
   password: password
   name: test
-raw_messages:
+messages_consumer:
   brokers:
     - 0.0.0.0:9092
   topic: sample
   group_id: sample_group_1
+messages_producer:
+  brokers:
+    - 0.0.0.0:9092
+  topic: sample

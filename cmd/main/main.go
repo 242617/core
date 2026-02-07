@@ -12,6 +12,7 @@ import (
 	"github.com/242617/core/config/source/file"
 	"github.com/242617/core/kafka"
 	"github.com/242617/core/kafka/consumer"
+	"github.com/242617/core/kafka/producer"
 	"github.com/242617/core/logger"
 	"github.com/242617/core/pgrepo"
 )
@@ -30,25 +31,37 @@ func main() {
 	defer func() { log.Debug(ctx, "stop", "in", time.Since(start)) }()
 
 	var cfg struct {
-		DB          pgrepo.Config   `yaml:"db"`
-		RawMessages consumer.Config `yaml:"raw_messages"`
+		DB               pgrepo.Config   `yaml:"db"`
+		MessagesConsumer consumer.Config `yaml:"messages_consumer"`
+		MessagesProducer producer.Config `yaml:"messages_producer"`
 	}
 	die(config.New().With(file.YAML("config.yaml")).Scan(&cfg))
 
-	db, err := pgrepo.New(pgrepo.WithLogger(log.New("pgrepo")), pgrepo.WithConfig(cfg.DB))
+	// db, err := pgrepo.New(pgrepo.WithLogger(log.New("pgrepo")), pgrepo.WithConfig(cfg.DB))
+	// die(err)
+
+	producer, err := producer.New(
+		producer.WithLogger(log.New("producer")),
+		producer.WithConfig(cfg.MessagesProducer),
+	)
 	die(err)
 
-	rawMessages, err := consumer.New(
-		consumer.WithLogger(log.New("raw messages")),
-		consumer.WithConfig(cfg.RawMessages),
+	consumer, err := consumer.New(
+		consumer.WithLogger(log.New("consumer")),
+		consumer.WithConfig(cfg.MessagesConsumer),
 		// consumer.WithGroupID(fmt.Sprintf("temporary_group_%v", rand.Int())),
 		consumer.WithStartOffset(kafka.StartOffsetEarliest),
 		consumer.WithHandler(func(ctx context.Context, msg kafka.Message) error {
-			log.Info(ctx, "message",
+			log.Info(ctx, "incoming message",
 				"key", string(msg.Key),
 				"value", string(msg.Value),
 			)
-			return nil
+			time.Sleep(time.Second)
+			log.Info(ctx, "outcoming message",
+				"key", string(msg.Key),
+				"value", string(msg.Value),
+			)
+			return producer.Produce(ctx, msg)
 		}),
 	)
 	die(err)
@@ -57,11 +70,22 @@ func main() {
 		application.WithLogger(log.New("application")),
 		application.WithName("main"),
 		application.WithComponents(
-			application.NewLifecycleComponent("db", db),
-			application.NewLifecycleComponent("raw messages", rawMessages),
+			// application.NewLifecycleComponent("db", db),
+			application.NewLifecycleComponent("consumer", consumer),
+			application.NewLifecycleComponent("producer", producer),
 		),
 	)
 	die(err)
+
+	go func() {
+		time.Sleep(time.Second)
+		log.Debug(ctx, "start")
+		msg := kafka.Message{
+			Key:   []byte("sample key"),
+			Value: []byte("sample value"),
+		}
+		die(producer.Produce(ctx, msg))
+	}()
 
 	die(app.Run(ctx))
 }

@@ -1,7 +1,8 @@
 package producer
 
 import (
-	stderrors "errors"
+	"errors"
+	"fmt"
 
 	"github.com/242617/core/kafka"
 	"github.com/242617/core/protocol"
@@ -22,12 +23,6 @@ type Config struct {
 
 	// Topic is the default Kafka topic for messages (required unless specified in Produce calls).
 	Topic string `yaml:"topic"`
-
-	// Logger is the logger for structured logging (optional, uses DefaultLogger).
-	Logger protocol.Logger `yaml:"-"`
-
-	// producer is the Kafka producer implementation (optional, primarily for testing).
-	producer KafkaProducer `yaml:"-"`
 }
 
 // Validate checks the configuration for errors.
@@ -42,7 +37,7 @@ func (c *Config) Validate() error {
 }
 
 // Option is a function that configures the Producer.
-type Option func(*Config) error
+type Option func(*Producer) error
 
 // defaults returns default producer configuration.
 func defaults() []Option {
@@ -51,44 +46,46 @@ func defaults() []Option {
 	}
 }
 
+func WithConfig(cfg Config) Option {
+	return func(p *Producer) error {
+		if err := cfg.Validate(); err != nil {
+			return fmt.Errorf("invalid config: %w", err)
+		}
+		p.brokers = cfg.Brokers
+		p.topic = cfg.Topic
+		return nil
+	}
+}
+
 // WithBrokers sets the Kafka broker addresses for producer.
 func WithBrokers(brokers ...string) Option {
-	return func(cfg *Config) error {
+	return func(p *Producer) error {
 		if len(brokers) == 0 {
-			return stderrors.New("brokers cannot be empty")
+			return errors.New("brokers cannot be empty")
 		}
-		cfg.Brokers = brokers
+		p.brokers = brokers
 		return nil
 	}
 }
 
 // WithTopic sets the default topic for producer messages.
 func WithTopic(topic string) Option {
-	return func(cfg *Config) error {
+	return func(p *Producer) error {
 		if topic == "" {
-			return stderrors.New("topic cannot be empty")
+			return errors.New("topic cannot be empty")
 		}
-		cfg.Topic = topic
+		p.topic = topic
 		return nil
 	}
 }
 
 // WithLogger sets the logger for producer.
 func WithLogger(logger protocol.Logger) Option {
-	return func(cfg *Config) error {
+	return func(p *Producer) error {
 		if logger == nil {
-			return stderrors.New("logger cannot be nil")
+			return errors.New("logger cannot be nil")
 		}
-		cfg.Logger = logger
-		return nil
-	}
-}
-
-// WithKafkaProducer sets a custom Kafka producer implementation.
-// This is primarily used for testing with mock implementations.
-func WithKafkaProducer(p KafkaProducer) Option {
-	return func(cfg *Config) error {
-		cfg.producer = p
+		p.log = logger
 		return nil
 	}
 }

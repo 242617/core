@@ -303,11 +303,9 @@ func (c *Consumer) handleMessage(ctx context.Context, record *kgo.Record) {
 	}
 
 	msg := kafka.Message{
-		Key:       record.Key,
-		Value:     record.Value,
-		Headers:   headers,
-		Topic:     record.Topic,
-		Partition: record.Partition,
+		Key:     record.Key,
+		Value:   record.Value,
+		Headers: headers,
 	}
 
 	// Call handler

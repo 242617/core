@@ -1,7 +1,7 @@
 package consumer
 
 import (
-	stderrors "errors"
+	"errors"
 	"fmt"
 	"time"
 
@@ -79,7 +79,7 @@ func WithConfig(cfg Config) Option {
 func WithBrokers(brokers ...string) Option {
 	return func(consumer *Consumer) error {
 		if len(brokers) == 0 {
-			return stderrors.New("brokers cannot be empty")
+			return errors.New("brokers cannot be empty")
 		}
 		consumer.brokers = brokers
 		return nil
@@ -90,7 +90,7 @@ func WithBrokers(brokers ...string) Option {
 func WithTopic(topic string) Option {
 	return func(consumer *Consumer) error {
 		if topic == "" {
-			return stderrors.New("topic cannot be empty")
+			return errors.New("topic cannot be empty")
 		}
 		consumer.topic = topic
 		return nil
@@ -101,7 +101,7 @@ func WithTopic(topic string) Option {
 func WithGroupID(groupID string) Option {
 	return func(consumer *Consumer) error {
 		if groupID == "" {
-			return stderrors.New("group ID cannot be empty")
+			return errors.New("group ID cannot be empty")
 		}
 		consumer.groupID = groupID
 		return nil
@@ -112,7 +112,7 @@ func WithGroupID(groupID string) Option {
 func WithHandler(handler kafka.Handler) Option {
 	return func(consumer *Consumer) error {
 		if handler == nil {
-			return stderrors.New("handler cannot be nil")
+			return errors.New("handler cannot be nil")
 		}
 		consumer.handler = handler
 		return nil
@@ -123,7 +123,7 @@ func WithHandler(handler kafka.Handler) Option {
 func WithLogger(logger protocol.Logger) Option {
 	return func(consumer *Consumer) error {
 		if logger == nil {
-			return stderrors.New("logger cannot be nil")
+			return errors.New("logger cannot be nil")
 		}
 		consumer.log = logger
 		return nil

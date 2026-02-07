@@ -4,11 +4,9 @@ import "context"
 
 // Message represents a Kafka message with key, value, headers, and routing info.
 type Message struct {
-	Key       []byte
-	Value     []byte
-	Headers   []Header
-	Topic     string // Overrides default topic if set
-	Partition int32  // Specific partition (optional)
+	Key     []byte
+	Value   []byte
+	Headers []Header
 }
 
 // Header represents a Kafka message header key-value pair.

@@ -11,10 +11,10 @@ test\:integration:
 	@mkdir -p .tmp/ && \
 		go test -v -tags=integration ./...
 
-docs:
-	@echo > docs.txt && \
+doc:
+	@echo > doc.txt && \
 		go list ./... | \
 			grep -v /cmd/ | \
 			grep -v /mocks/ | \
 			grep -v /vendor/ | \
-			xargs -n1 -I {} sh -c 'echo "=== {} ===" >> docs.txt && go doc -all {} >> docs.txt'
+			xargs -n1 -I {} sh -c 'echo "=== {} ===" >> doc.txt && go doc -all {} >> doc.txt'

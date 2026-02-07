@@ -260,6 +260,48 @@ func main() {
 
 ---
 
+## Pipeline
+
+Fluent workflow execution with error handling and cleanup.
+
+```go
+import "github.com/242617/core/pipeline"
+
+errCh := make(chan error)
+go pipeline.New(ctx).
+    Before(func() { fmt.Println("setup") }).
+    Then(func(ctx context.Context) error {
+        // main logic
+        return nil
+    }).
+    Else(func(ctx context.Context) error {
+        // fallback on error
+        return nil
+    }).
+    After(func() { fmt.Println("cleanup") }).
+    Run(func(err error) { errCh <- err })
+```
+
+**Execution order:** `Before` → `Then`/`Else` → `Error`/`NoError` → `After`
+
+---
+
+## Request ID
+
+Context-based request ID propagation for tracing.
+
+```go
+import "github.com/242617/core/request_id"
+
+// Set in middleware
+ctx = request_id.ContextWithRequestID(ctx, requestID)
+
+// Retrieve anywhere
+requestID := request_id.RequestIDFromContext(ctx)
+```
+
+---
+
 ## Best Practices
 
 1. Always pass context through all layers

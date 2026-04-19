@@ -3,6 +3,7 @@ package consumer_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -488,13 +489,22 @@ func TestConcurrency(t *testing.T) {
 		require.NoError(t, err)
 
 		ctx := context.Background()
+
 		errCh := make(chan error, 2)
 
-		go func() { errCh <- c.Start(ctx) }()
-		go func() { errCh <- c.Start(ctx) }()
+		var wg sync.WaitGroup
+		wg.Add(2)
 
-		// Wait for both goroutines
-		time.Sleep(200 * time.Millisecond)
+		go func() {
+			defer wg.Done()
+			errCh <- c.Start(ctx)
+		}()
+		go func() {
+			defer wg.Done()
+			errCh <- c.Start(ctx)
+		}()
+
+		wg.Wait()
 		close(errCh)
 
 		var successCount, errorCount int
@@ -534,10 +544,20 @@ func TestConcurrency(t *testing.T) {
 		defer cancel()
 
 		errCh := make(chan error, 2)
-		go func() { errCh <- c.Stop(stopCtx) }()
-		go func() { errCh <- c.Stop(stopCtx) }()
 
-		time.Sleep(200 * time.Millisecond)
+		var wg sync.WaitGroup
+		wg.Add(2)
+
+		go func() {
+			defer wg.Done()
+			errCh <- c.Stop(stopCtx)
+		}()
+		go func() {
+			defer wg.Done()
+			errCh <- c.Stop(stopCtx)
+		}()
+
+		wg.Wait()
 		close(errCh)
 
 		// Both stops should succeed (idempotent)

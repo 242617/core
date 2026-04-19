@@ -33,6 +33,7 @@ type Consumer struct {
 	cancelFunc context.CancelFunc
 	wg         sync.WaitGroup
 	started    bool
+	stopped    bool
 }
 
 // New creates a new Kafka consumer with the provided options.
@@ -158,18 +159,26 @@ func (c *Consumer) Start(ctx context.Context) error {
 // Idempotent and safe to call multiple times.
 func (c *Consumer) Stop(ctx context.Context) error {
 	c.mu.Lock()
+
+	if c.stopped {
+		c.mu.Unlock()
+		return nil
+	}
+	c.stopped = true
+
 	if !c.started {
 		c.mu.Unlock()
 		return nil
 	}
-	c.mu.Unlock()
-
-	c.log.Info(ctx, "stopping consumer")
 
 	// Cancel the consumer context to signal shutdown
 	if c.cancelFunc != nil {
 		c.cancelFunc()
 	}
+
+	c.mu.Unlock()
+
+	c.log.Info(ctx, "stopping consumer")
 
 	// Wait for consumer loop to finish or context timeout
 	done := make(chan struct{})
@@ -183,14 +192,25 @@ func (c *Consumer) Stop(ctx context.Context) error {
 		c.log.Info(ctx, "consumer stopped")
 	case <-ctx.Done():
 		c.log.Warn(ctx, "consumer stop timeout")
+		c.mu.Lock()
+		c.cleanupClient()
+		c.mu.Unlock()
 		return ctx.Err()
 	}
 
-	// Clean shutdown
-	c.client.LeaveGroup()
-	c.client.Close()
+	c.mu.Lock()
+	c.cleanupClient()
+	c.mu.Unlock()
 
 	return nil
+}
+
+func (c *Consumer) cleanupClient() {
+	if c.client != nil {
+		c.client.LeaveGroup()
+		c.client.Close()
+		c.client = nil
+	}
 }
 
 // run is the main consumer loop, executed in a goroutine.
@@ -290,6 +310,12 @@ func (c *Consumer) run() {
 			}
 		})
 	}
+}
+
+func (c *Consumer) IsStarted() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.started
 }
 
 // handleMessage processes a single message.
